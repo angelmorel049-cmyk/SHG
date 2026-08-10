@@ -1,4 +1,3 @@
-
 const http = require("http");
 
 const PORT = process.env.PORT || 3000;
@@ -22,6 +21,7 @@ const server = http.createServer((req, res) => {
         "Access-Control-Allow-Origin": "*"
     });
 
+    // Server status
     if (req.url === "/") {
         res.end(JSON.stringify({
             online: true,
@@ -30,11 +30,13 @@ const server = http.createServer((req, res) => {
         return;
     }
 
+    // Create room
     if (req.url === "/create") {
         const code = generateCode();
 
         rooms[code] = {
-            players: 1
+            players: 1,
+            lastHeartbeat: Date.now()
         };
 
         console.log("Room created:", code);
@@ -46,6 +48,29 @@ const server = http.createServer((req, res) => {
         return;
     }
 
+    // Heartbeat
+    if (req.url.startsWith("/heartbeat")) {
+        const url = new URL(req.url, `http://${req.headers.host}`);
+        const code = url.searchParams.get("code");
+
+        if (!code || !rooms[code]) {
+            res.end(JSON.stringify({
+                success: false,
+                error: "Room not found"
+            }));
+            return;
+        }
+
+        rooms[code].lastHeartbeat = Date.now();
+
+        res.end(JSON.stringify({
+            success: true,
+            code: code
+        }));
+        return;
+    }
+
+    // Manual leave
     if (req.url.startsWith("/leave")) {
         const url = new URL(req.url, `http://${req.headers.host}`);
         const code = url.searchParams.get("code");
@@ -72,8 +97,6 @@ const server = http.createServer((req, res) => {
             return;
         }
 
-        console.log("Player left room:", code);
-
         res.end(JSON.stringify({
             success: true,
             deleted: false,
@@ -82,6 +105,7 @@ const server = http.createServer((req, res) => {
         return;
     }
 
+    // Room list
     if (req.url === "/rooms") {
         res.end(JSON.stringify({
             rooms: rooms
@@ -89,11 +113,29 @@ const server = http.createServer((req, res) => {
         return;
     }
 
+    // Unknown request
     res.end(JSON.stringify({
         success: false,
         error: "Unknown request"
     }));
 });
+
+// Check for players that stopped sending heartbeats
+setInterval(() => {
+    const now = Date.now();
+
+    for (const code in rooms) {
+        const room = rooms[code];
+
+        if (now - room.lastHeartbeat > 10000) {
+            console.log("Player timed out:", code);
+
+            delete rooms[code];
+
+            console.log("Room deleted:", code);
+        }
+    }
+}, 1000);
 
 server.listen(PORT, HOST, () => {
     console.log(`Server running on ${HOST}:${PORT}`);
