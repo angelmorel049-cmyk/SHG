@@ -32,4 +32,4 @@ if (req.url.startsWith("/leave")) {
         players: rooms[code].players
     }));
     return;
-            }
+}
