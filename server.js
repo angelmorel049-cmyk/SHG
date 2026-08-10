@@ -21,7 +21,7 @@ const server = http.createServer((req, res) => {
         "Access-Control-Allow-Origin": "*"
     });
 
-    // Server status
+    // SERVER STATUS
     if (req.url === "/") {
         res.end(JSON.stringify({
             online: true,
@@ -30,7 +30,7 @@ const server = http.createServer((req, res) => {
         return;
     }
 
-    // Create room
+    // CREATE ROOM
     if (req.url === "/create") {
         const code = generateCode();
 
@@ -48,10 +48,16 @@ const server = http.createServer((req, res) => {
         return;
     }
 
-    // Heartbeat
+    // HEARTBEAT
     if (req.url.startsWith("/heartbeat")) {
-        const url = new URL(req.url, `http://${req.headers.host}`);
+        const url = new URL(
+            req.url,
+            `http://${req.headers.host}`
+        );
+
         const code = url.searchParams.get("code");
+
+        console.log("HEARTBEAT RECEIVED:", code);
 
         if (!code || !rooms[code]) {
             res.end(JSON.stringify({
@@ -70,9 +76,13 @@ const server = http.createServer((req, res) => {
         return;
     }
 
-    // Manual leave
+    // LEAVE ROOM
     if (req.url.startsWith("/leave")) {
-        const url = new URL(req.url, `http://${req.headers.host}`);
+        const url = new URL(
+            req.url,
+            `http://${req.headers.host}`
+        );
+
         const code = url.searchParams.get("code");
 
         if (!code || !rooms[code]) {
@@ -97,6 +107,8 @@ const server = http.createServer((req, res) => {
             return;
         }
 
+        console.log("Player left room:", code);
+
         res.end(JSON.stringify({
             success: true,
             deleted: false,
@@ -105,7 +117,7 @@ const server = http.createServer((req, res) => {
         return;
     }
 
-    // Room list
+    // LIST ROOMS
     if (req.url === "/rooms") {
         res.end(JSON.stringify({
             rooms: rooms
@@ -113,29 +125,29 @@ const server = http.createServer((req, res) => {
         return;
     }
 
-    // Unknown request
+    // UNKNOWN REQUEST
     res.end(JSON.stringify({
         success: false,
         error: "Unknown request"
     }));
 });
 
-// Check for players that stopped sending heartbeats
+// CHECK FOR DEAD ROOMS EVERY 5 SECONDS
 setInterval(() => {
     const now = Date.now();
 
     for (const code in rooms) {
-        const room = rooms[code];
+        const timeSinceHeartbeat =
+            now - rooms[code].lastHeartbeat;
 
-        if (now - room.lastHeartbeat > 10000) {
-            console.log("Player timed out:", code);
+        // 30 seconds without heartbeat = disconnected
+        if (timeSinceHeartbeat > 30000) {
+            console.log("Room timed out:", code);
 
             delete rooms[code];
-
-            console.log("Room deleted:", code);
         }
     }
-}, 1000);
+}, 5000);
 
 server.listen(PORT, HOST, () => {
     console.log(`Server running on ${HOST}:${PORT}`);
