@@ -21,6 +21,13 @@ const server = http.createServer((req, res) => {
         "Access-Control-Allow-Origin": "*"
     });
 
+    
+  if (req.url === "/version") {
+    res.end(JSON.stringify({
+        version: "1.0.0"
+    }));
+    return;
+  }  
     // SERVER STATUS
     if (req.url === "/") {
         res.end(JSON.stringify({
