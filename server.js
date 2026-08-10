@@ -1,63 +1,35 @@
-const http = require("http");
+if (req.url.startsWith("/leave")) {
+    const url = new URL(req.url, `http://${req.headers.host}`);
+    const code = url.searchParams.get("code");
 
-const PORT = process.env.PORT || 3000;
-const HOST = "0.0.0.0";
-
-const rooms = {};
-
-function generateCode() {
-    let code;
-
-    do {
-        code = Math.floor(1000 + Math.random() * 9000).toString();
-    } while (rooms[code]);
-
-    return code;
-}
-
-const server = http.createServer((req, res) => {
-    res.writeHead(200, {
-        "Content-Type": "application/json",
-        "Access-Control-Allow-Origin": "*"
-    });
-
-    if (req.url === "/") {
+    if (!code || !rooms[code]) {
         res.end(JSON.stringify({
-            online: true,
-            message: "Scary Horror Game Server is online!"
+            success: false,
+            error: "Room not found"
         }));
         return;
     }
 
-    if (req.url === "/create") {
-        const code = generateCode();
+    rooms[code].players -= 1;
 
-        rooms[code] = {
-            players: 1
-        };
+    if (rooms[code].players <= 0) {
+        delete rooms[code];
+
+        console.log("Room deleted:", code);
 
         res.end(JSON.stringify({
             success: true,
-            code: code
-        }));
-
-        console.log("Room created:", code);
-        return;
-    }
-
-    if (req.url === "/rooms") {
-        res.end(JSON.stringify({
-            rooms: rooms
+            deleted: true
         }));
         return;
     }
+
+    console.log("Player left room:", code);
 
     res.end(JSON.stringify({
-        success: false,
-        error: "Unknown request"
+        success: true,
+        deleted: false,
+        players: rooms[code].players
     }));
-});
-
-server.listen(PORT, HOST, () => {
-    console.log(`Server running on ${HOST}:${PORT}`);
-});
+    return;
+            }
