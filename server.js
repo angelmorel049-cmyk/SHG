@@ -3,43 +3,46 @@ const http = require("http");
 const PORT = process.env.PORT || 3000;
 const HOST = "0.0.0.0";
 
+// Server configuration & memory state
+const SERVER_VERSION = "1.0.0";
 const rooms = {};
 
-function generateCode() {
-    let code;
-
-    do {
-        code = Math.floor(1000 + Math.random() * 9000).toString();
-    } while (rooms[code]);
-
-    return code;
+// Helper to generate a random 4-digit room code
+function generateRoomCode() {
+    return Math.floor(1000 + Math.random() * 9000).toString();
 }
 
 const server = http.createServer((req, res) => {
-    res.writeHead(200, {
-        "Content-Type": "application/json",
-        "Access-Control-Allow-Origin": "*"
-    });
+    // Parse the incoming URL safely using the Host header
+    const host = req.headers.host || "localhost";
+    const url = new URL(req.url, `http://${host}`);
+    const path = url.pathname;
 
-    
-  if (req.url === "/version") {
-    res.end(JSON.stringify({
-        version: "1"
-    }));
-    return;
-  }  
-    // SERVER STATUS
-    if (req.url === "/") {
+    // --- ROOT / HEALTH CHECK ---
+    if (path === "/") {
+        res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify({
-            online: true,
-            message: "Scary Horror Game Server is online!"
+            status: "Server running",
+            success: true
         }));
         return;
     }
 
-    // CREATE ROOM
-    if (req.url === "/create") {
-        const code = generateCode();
+    // --- VERSION CHECK ---
+    if (path === "/version") {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({
+            version: SERVER_VERSION
+        }));
+        return;
+    }
+
+    // --- CREATE ROOM ---
+    if (path === "/create") {
+        let code = generateRoomCode();
+        while (rooms[code]) {
+            code = generateRoomCode();
+        }
 
         rooms[code] = {
             players: 1,
@@ -48,6 +51,7 @@ const server = http.createServer((req, res) => {
 
         console.log("Room created:", code);
 
+        res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify({
             success: true,
             code: code
@@ -55,18 +59,14 @@ const server = http.createServer((req, res) => {
         return;
     }
 
-    // HEARTBEAT
-    if (req.url.startsWith("/heartbeat")) {
-        const url = new URL(
-            req.url,
-            `http://${req.headers.host}`
-        );
-
+    // --- HEARTBEAT ---
+    if (path === "/heartbeat") {
         const code = url.searchParams.get("code");
 
         console.log("HEARTBEAT RECEIVED:", code);
 
         if (!code || !rooms[code]) {
+            res.writeHead(404, { "Content-Type": "application/json" });
             res.end(JSON.stringify({
                 success: false,
                 error: "Room not found"
@@ -74,25 +74,22 @@ const server = http.createServer((req, res) => {
             return;
         }
 
+        // Refresh heartbeat timestamp
         rooms[code].lastHeartbeat = Date.now();
 
+        res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify({
-            success: true,
-            code: code
+            success: true
         }));
         return;
     }
 
-    // LEAVE ROOM
-    if (req.url.startsWith("/leave")) {
-        const url = new URL(
-            req.url,
-            `http://${req.headers.host}`
-        );
-
+    // --- LEAVE ROOM ---
+    if (path === "/leave") {
         const code = url.searchParams.get("code");
 
         if (!code || !rooms[code]) {
+            res.writeHead(404, { "Content-Type": "application/json" });
             res.end(JSON.stringify({
                 success: false,
                 error: "Room not found"
@@ -104,9 +101,9 @@ const server = http.createServer((req, res) => {
 
         if (rooms[code].players <= 0) {
             delete rooms[code];
-
             console.log("Room deleted:", code);
 
+            res.writeHead(200, { "Content-Type": "application/json" });
             res.end(JSON.stringify({
                 success: true,
                 deleted: true
@@ -116,6 +113,7 @@ const server = http.createServer((req, res) => {
 
         console.log("Player left room:", code);
 
+        res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify({
             success: true,
             deleted: false,
@@ -124,15 +122,17 @@ const server = http.createServer((req, res) => {
         return;
     }
 
-    // LIST ROOMS
-    if (req.url === "/rooms") {
+    // --- LIST ROOMS ---
+    if (path === "/rooms") {
+        res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify({
             rooms: rooms
         }));
         return;
     }
 
-    // UNKNOWN REQUEST
+    // --- UNKNOWN REQUEST ---
+    res.writeHead(404, { "Content-Type": "application/json" });
     res.end(JSON.stringify({
         success: false,
         error: "Unknown request"
@@ -144,18 +144,17 @@ setInterval(() => {
     const now = Date.now();
 
     for (const code in rooms) {
-        const timeSinceHeartbeat =
-            now - rooms[code].lastHeartbeat;
+        const timeSinceHeartbeat = now - rooms[code].lastHeartbeat;
 
-        // 30 seconds without heartbeat = disconnected
+        // 30 seconds without heartbeat = timeout
         if (timeSinceHeartbeat > 30000) {
             console.log("Room timed out:", code);
-
             delete rooms[code];
         }
     }
 }, 5000);
 
+// START SERVER
 server.listen(PORT, HOST, () => {
     console.log(`Server running on ${HOST}:${PORT}`);
 });
