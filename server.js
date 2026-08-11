@@ -59,6 +59,33 @@ const server = http.createServer((req, res) => {
         return;
     }
 
+    // --- JOIN ROOM ---
+    if (path === "/join") {
+        const code = url.searchParams.get("code");
+
+        if (!code || !rooms[code]) {
+            res.writeHead(404, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({
+                success: false,
+                error: "Room not found"
+            }));
+            return;
+        }
+
+        // Add player and refresh heartbeat
+        rooms[code].players += 1;
+        rooms[code].lastHeartbeat = Date.now();
+
+        console.log(`Player joined room ${code}. Total players: ${rooms[code].players}`);
+
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({
+            success: true,
+            players: rooms[code].players
+        }));
+        return;
+    }
+
     // --- HEARTBEAT ---
     if (path === "/heartbeat") {
         const code = url.searchParams.get("code");
