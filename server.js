@@ -24,7 +24,7 @@ const server = http.createServer((req, res) => {
     
   if (req.url === "/version") {
     res.end(JSON.stringify({
-        version: "1.0.0"
+        version: "1"
     }));
     return;
   }  
