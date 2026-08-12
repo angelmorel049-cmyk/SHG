@@ -3,17 +3,18 @@ const http = require("http");
 const PORT = process.env.PORT || 3000;
 const HOST = "0.0.0.0";
 
-// Server configuration & memory state
 const SERVER_VERSION = "1.0.0";
 const rooms = {};
 
-// Helper to generate a random 4-digit room code
 function generateRoomCode() {
     return Math.floor(1000 + Math.random() * 9000).toString();
 }
 
+function generatePlayerId() {
+    return Math.random().toString(36).substring(2, 10);
+}
+
 const server = http.createServer((req, res) => {
-    // Parse the incoming URL safely using the Host header
     const host = req.headers.host || "localhost";
     const url = new URL(req.url, `http://${host}`);
     const path = url.pathname;
@@ -40,21 +41,30 @@ const server = http.createServer((req, res) => {
     // --- CREATE ROOM ---
     if (path === "/create") {
         let code = generateRoomCode();
+
         while (rooms[code]) {
             code = generateRoomCode();
         }
 
+        const playerId = generatePlayerId();
+
         rooms[code] = {
             players: 1,
-            lastHeartbeat: Date.now()
+            lastHeartbeat: Date.now(),
+            playerIds: [playerId],
+            playerStates: {}
         };
 
-        console.log("Room created:", code);
+        console.log(
+            `Room created: ${code}. Host Player ID: ${playerId}`
+        );
 
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify({
             success: true,
-            code: code
+            code: code,
+            playerId: playerId,
+            players: 1
         }));
         return;
     }
@@ -72,18 +82,156 @@ const server = http.createServer((req, res) => {
             return;
         }
 
-        // Add player and refresh heartbeat
+        const playerId = generatePlayerId();
+
         rooms[code].players += 1;
         rooms[code].lastHeartbeat = Date.now();
 
-        console.log(`Player joined room ${code}. Total players: ${rooms[code].players}`);
+        if (!rooms[code].playerIds) {
+            rooms[code].playerIds = [];
+        }
+
+        if (!rooms[code].playerStates) {
+            rooms[code].playerStates = {};
+        }
+
+        rooms[code].playerIds.push(playerId);
+
+        console.log(
+            `Player joined room ${code}. Player ID: ${playerId}. Total players: ${rooms[code].players}`
+        );
 
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify({
             success: true,
+            playerId: playerId,
             players: rooms[code].players
         }));
         return;
+    }
+
+    // --- PLAYER STATE ---
+    if (path === "/state") {
+
+        // ----- SEND PLAYER STATE -----
+        if (req.method === "POST") {
+            let body = "";
+
+            req.on("data", chunk => {
+                body += chunk;
+            });
+
+            req.on("end", () => {
+                try {
+                    const data = JSON.parse(body);
+
+                    const code = data.code;
+                    const playerId = data.playerId;
+
+                    if (!code || !playerId || !rooms[code]) {
+                        res.writeHead(404, {
+                            "Content-Type": "application/json"
+                        });
+
+                        res.end(JSON.stringify({
+                            success: false,
+                            error: "Room not found"
+                        }));
+
+                        return;
+                    }
+
+                    if (!rooms[code].playerIds.includes(playerId)) {
+                        res.writeHead(403, {
+                            "Content-Type": "application/json"
+                        });
+
+                        res.end(JSON.stringify({
+                            success: false,
+                            error: "Player not in room"
+                        }));
+
+                        return;
+                    }
+
+                    if (!rooms[code].playerStates) {
+                        rooms[code].playerStates = {};
+                    }
+
+                    rooms[code].playerStates[playerId] = {
+                        head: data.head || null,
+                        left_hand: data.left_hand || null,
+                        right_hand: data.right_hand || null,
+                        lastUpdate: Date.now()
+                    };
+
+                    rooms[code].lastHeartbeat = Date.now();
+
+                    res.writeHead(200, {
+                        "Content-Type": "application/json"
+                    });
+
+                    res.end(JSON.stringify({
+                        success: true
+                    }));
+
+                } catch (error) {
+                    console.log("STATE JSON ERROR:", error);
+
+                    res.writeHead(400, {
+                        "Content-Type": "application/json"
+                    });
+
+                    res.end(JSON.stringify({
+                        success: false,
+                        error: "Invalid JSON"
+                    }));
+                }
+            });
+
+            return;
+        }
+
+        // ----- GET ALL PLAYER STATES -----
+        if (req.method === "GET") {
+            const code = url.searchParams.get("code");
+            const playerId = url.searchParams.get("playerId");
+
+            if (!code || !rooms[code]) {
+                res.writeHead(404, {
+                    "Content-Type": "application/json"
+                });
+
+                res.end(JSON.stringify({
+                    success: false,
+                    error: "Room not found"
+                }));
+
+                return;
+            }
+
+            const allStates = rooms[code].playerStates || {};
+
+            // Don't send the requesting player's own state back.
+            const otherPlayers = {};
+
+            for (const id in allStates) {
+                if (id !== playerId) {
+                    otherPlayers[id] = allStates[id];
+                }
+            }
+
+            res.writeHead(200, {
+                "Content-Type": "application/json"
+            });
+
+            res.end(JSON.stringify({
+                success: true,
+                players: otherPlayers
+            }));
+
+            return;
+        }
     }
 
     // --- HEARTBEAT ---
@@ -101,7 +249,6 @@ const server = http.createServer((req, res) => {
             return;
         }
 
-        // Refresh heartbeat timestamp
         rooms[code].lastHeartbeat = Date.now();
 
         res.writeHead(200, { "Content-Type": "application/json" });
@@ -114,6 +261,7 @@ const server = http.createServer((req, res) => {
     // --- LEAVE ROOM ---
     if (path === "/leave") {
         const code = url.searchParams.get("code");
+        const playerId = url.searchParams.get("playerId");
 
         if (!code || !rooms[code]) {
             res.writeHead(404, { "Content-Type": "application/json" });
@@ -124,10 +272,21 @@ const server = http.createServer((req, res) => {
             return;
         }
 
+        if (playerId && rooms[code].playerIds) {
+            rooms[code].playerIds = rooms[code].playerIds.filter(
+                id => id !== playerId
+            );
+        }
+
+        if (playerId && rooms[code].playerStates) {
+            delete rooms[code].playerStates[playerId];
+        }
+
         rooms[code].players -= 1;
 
         if (rooms[code].players <= 0) {
             delete rooms[code];
+
             console.log("Room deleted:", code);
 
             res.writeHead(200, { "Content-Type": "application/json" });
@@ -138,7 +297,9 @@ const server = http.createServer((req, res) => {
             return;
         }
 
-        console.log("Player left room:", code);
+        console.log(
+            `Player left room ${code}. Remaining players: ${rooms[code].players}`
+        );
 
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify({
@@ -171,12 +332,31 @@ setInterval(() => {
     const now = Date.now();
 
     for (const code in rooms) {
-        const timeSinceHeartbeat = now - rooms[code].lastHeartbeat;
+        const room = rooms[code];
 
-        // 30 seconds without heartbeat = timeout
+        const timeSinceHeartbeat =
+            now - room.lastHeartbeat;
+
+        // 30 seconds without heartbeat = room timeout
         if (timeSinceHeartbeat > 30000) {
             console.log("Room timed out:", code);
             delete rooms[code];
+            continue;
+        }
+
+        // Remove player tracking data that stopped updating
+        if (room.playerStates) {
+            for (const playerId in room.playerStates) {
+                const state = room.playerStates[playerId];
+
+                if (now - state.lastUpdate > 10000) {
+                    console.log(
+                        `Tracking timeout for player ${playerId} in room ${code}`
+                    );
+
+                    delete room.playerStates[playerId];
+                }
+            }
         }
     }
 }, 5000);
