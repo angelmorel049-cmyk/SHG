@@ -7,20 +7,13 @@ const SERVER_VERSION = "1.0.0";
 
 const rooms = {};
 
-// ============================================================
-// BANNED IP ADDRESSES
-// Add banned IPs inside this array.
-// Example:
-// const BANNED_IPS = ["123.123.123.123", "111.111.111.111"];
-// ============================================================
-
 const BANNED_IPS = [
     // "123.123.123.123"
 ];
 
 
 // ============================================================
-// ROOM CODE
+// GENERATE ROOM CODE
 // ============================================================
 
 function generateRoomCode() {
@@ -29,7 +22,7 @@ function generateRoomCode() {
 
 
 // ============================================================
-// PLAYER ID
+// GENERATE PLAYER ID
 // ============================================================
 
 function generatePlayerId() {
@@ -38,7 +31,7 @@ function generatePlayerId() {
 
 
 // ============================================================
-// GET CLIENT IP
+// GET PLAYER IP
 // ============================================================
 
 function getClientIP(req) {
@@ -101,7 +94,7 @@ const server = http.createServer((req, res) => {
 
 
     // ========================================================
-    // BAN CHECK
+    // CHECK BAN
     // ========================================================
 
     if (path === "/check-ban") {
@@ -140,16 +133,26 @@ const server = http.createServer((req, res) => {
         }
 
         const playerId = generatePlayerId();
+        const playerIP = getClientIP(req);
 
         rooms[code] = {
             players: 1,
+
             lastHeartbeat: Date.now(),
-            playerIds: [playerId],
-            playerStates: {}
+
+            playerIds: [
+                playerId
+            ],
+
+            playerStates: {},
+
+            playerIPs: {
+                [playerId]: playerIP
+            }
         };
 
         console.log(
-            `Room created: ${code}. Host Player ID: ${playerId}`
+            `Room created: ${code}. Host Player ID: ${playerId}. IP: ${playerIP}`
         );
 
         res.writeHead(200, {
@@ -190,9 +193,12 @@ const server = http.createServer((req, res) => {
         }
 
         const playerId = generatePlayerId();
+        const playerIP = getClientIP(req);
 
         rooms[code].players += 1;
+
         rooms[code].lastHeartbeat = Date.now();
+
 
         if (!rooms[code].playerIds) {
             rooms[code].playerIds = [];
@@ -202,11 +208,20 @@ const server = http.createServer((req, res) => {
             rooms[code].playerStates = {};
         }
 
+        if (!rooms[code].playerIPs) {
+            rooms[code].playerIPs = {};
+        }
+
+
         rooms[code].playerIds.push(playerId);
 
+        rooms[code].playerIPs[playerId] = playerIP;
+
+
         console.log(
-            `Player joined room ${code}. Player ID: ${playerId}. Total players: ${rooms[code].players}`
+            `Player joined room ${code}. Player ID: ${playerId}. IP: ${playerIP}. Total players: ${rooms[code].players}`
         );
+
 
         res.writeHead(200, {
             "Content-Type": "application/json"
@@ -229,9 +244,9 @@ const server = http.createServer((req, res) => {
     if (path === "/state") {
 
 
-        // ----------------------------------------------------
-        // SEND PLAYER STATE
-        // ----------------------------------------------------
+        // ====================================================
+        // POST PLAYER STATE
+        // ====================================================
 
         if (req.method === "POST") {
 
@@ -241,6 +256,7 @@ const server = http.createServer((req, res) => {
                 body += chunk;
             });
 
+
             req.on("end", () => {
 
                 try {
@@ -249,6 +265,7 @@ const server = http.createServer((req, res) => {
 
                     const code = data.code;
                     const playerId = data.playerId;
+
 
                     if (!code || !playerId || !rooms[code]) {
 
@@ -316,6 +333,7 @@ const server = http.createServer((req, res) => {
                         error
                     );
 
+
                     res.writeHead(400, {
                         "Content-Type": "application/json"
                     });
@@ -331,13 +349,14 @@ const server = http.createServer((req, res) => {
         }
 
 
-        // ----------------------------------------------------
+        // ====================================================
         // GET ALL PLAYER STATES
-        // ----------------------------------------------------
+        // ====================================================
 
         if (req.method === "GET") {
 
-            const code = url.searchParams.get("code");
+            const code =
+                url.searchParams.get("code");
 
             const playerId =
                 url.searchParams.get("playerId");
@@ -464,6 +483,8 @@ const server = http.createServer((req, res) => {
         }
 
 
+        // Remove player ID
+
         if (
             playerId &&
             rooms[code].playerIds
@@ -476,6 +497,8 @@ const server = http.createServer((req, res) => {
         }
 
 
+        // Remove player state
+
         if (
             playerId &&
             rooms[code].playerStates
@@ -486,8 +509,22 @@ const server = http.createServer((req, res) => {
         }
 
 
+        // Remove player IP
+
+        if (
+            playerId &&
+            rooms[code].playerIPs
+        ) {
+
+            delete rooms[code]
+                .playerIPs[playerId];
+        }
+
+
         rooms[code].players -= 1;
 
+
+        // Delete empty room
 
         if (rooms[code].players <= 0) {
 
@@ -538,12 +575,35 @@ const server = http.createServer((req, res) => {
 
     if (path === "/rooms") {
 
+        const roomList = {};
+
+
+        for (const code in rooms) {
+
+            const room = rooms[code];
+
+
+            roomList[code] = {
+
+                players: room.players,
+
+                playerIds:
+                    room.playerIds || [],
+
+                playerIPs:
+                    room.playerIPs || {}
+            };
+        }
+
+
         res.writeHead(200, {
             "Content-Type": "application/json"
         });
 
+
         res.end(JSON.stringify({
-            rooms: rooms
+            success: true,
+            rooms: roomList
         }));
 
         return;
@@ -566,7 +626,7 @@ const server = http.createServer((req, res) => {
 
 
 // ============================================================
-// CHECK FOR DEAD ROOMS EVERY 5 SECONDS
+// ROOM CLEANUP
 // ============================================================
 
 setInterval(() => {
@@ -599,9 +659,9 @@ setInterval(() => {
         }
 
 
-        // ----------------------------------------------------
+        // ====================================================
         // REMOVE OLD PLAYER TRACKING DATA
-        // ----------------------------------------------------
+        // ====================================================
 
         if (room.playerStates) {
 
