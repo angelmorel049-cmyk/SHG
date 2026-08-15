@@ -4,42 +4,135 @@ const PORT = process.env.PORT || 3000;
 const HOST = "0.0.0.0";
 
 const SERVER_VERSION = "1.0.0";
+
 const rooms = {};
+
+// ============================================================
+// BANNED IP ADDRESSES
+// Add banned IPs inside this array.
+// Example:
+// const BANNED_IPS = ["123.123.123.123", "111.111.111.111"];
+// ============================================================
+
+const BANNED_IPS = [
+    // "123.123.123.123"
+];
+
+
+// ============================================================
+// ROOM CODE
+// ============================================================
 
 function generateRoomCode() {
     return Math.floor(1000 + Math.random() * 9000).toString();
 }
 
+
+// ============================================================
+// PLAYER ID
+// ============================================================
+
 function generatePlayerId() {
     return Math.random().toString(36).substring(2, 10);
 }
 
+
+// ============================================================
+// GET CLIENT IP
+// ============================================================
+
+function getClientIP(req) {
+    const forwarded = req.headers["x-forwarded-for"];
+
+    if (forwarded) {
+        return forwarded.split(",")[0].trim();
+    }
+
+    return req.socket.remoteAddress || "";
+}
+
+
+// ============================================================
+// SERVER
+// ============================================================
+
 const server = http.createServer((req, res) => {
+
     const host = req.headers.host || "localhost";
     const url = new URL(req.url, `http://${host}`);
     const path = url.pathname;
 
-    // --- ROOT / HEALTH CHECK ---
+
+    // ========================================================
+    // ROOT / HEALTH CHECK
+    // ========================================================
+
     if (path === "/") {
-        res.writeHead(200, { "Content-Type": "application/json" });
+
+        res.writeHead(200, {
+            "Content-Type": "application/json"
+        });
+
         res.end(JSON.stringify({
             status: "Server running",
             success: true
         }));
+
         return;
     }
 
-    // --- VERSION CHECK ---
+
+    // ========================================================
+    // VERSION CHECK
+    // ========================================================
+
     if (path === "/version") {
-        res.writeHead(200, { "Content-Type": "application/json" });
+
+        res.writeHead(200, {
+            "Content-Type": "application/json"
+        });
+
         res.end(JSON.stringify({
             version: SERVER_VERSION
         }));
+
         return;
     }
 
-    // --- CREATE ROOM ---
+
+    // ========================================================
+    // BAN CHECK
+    // ========================================================
+
+    if (path === "/check-ban") {
+
+        const ip = getClientIP(req);
+
+        const banned = BANNED_IPS.includes(ip);
+
+        console.log(
+            `Ban check: ${ip} -> ${banned ? "BANNED" : "ALLOWED"}`
+        );
+
+        res.writeHead(200, {
+            "Content-Type": "application/json"
+        });
+
+        res.end(JSON.stringify({
+            success: true,
+            banned: banned
+        }));
+
+        return;
+    }
+
+
+    // ========================================================
+    // CREATE ROOM
+    // ========================================================
+
     if (path === "/create") {
+
         let code = generateRoomCode();
 
         while (rooms[code]) {
@@ -59,26 +152,40 @@ const server = http.createServer((req, res) => {
             `Room created: ${code}. Host Player ID: ${playerId}`
         );
 
-        res.writeHead(200, { "Content-Type": "application/json" });
+        res.writeHead(200, {
+            "Content-Type": "application/json"
+        });
+
         res.end(JSON.stringify({
             success: true,
             code: code,
             playerId: playerId,
             players: 1
         }));
+
         return;
     }
 
-    // --- JOIN ROOM ---
+
+    // ========================================================
+    // JOIN ROOM
+    // ========================================================
+
     if (path === "/join") {
+
         const code = url.searchParams.get("code");
 
         if (!code || !rooms[code]) {
-            res.writeHead(404, { "Content-Type": "application/json" });
+
+            res.writeHead(404, {
+                "Content-Type": "application/json"
+            });
+
             res.end(JSON.stringify({
                 success: false,
                 error: "Room not found"
             }));
+
             return;
         }
 
@@ -101,20 +208,33 @@ const server = http.createServer((req, res) => {
             `Player joined room ${code}. Player ID: ${playerId}. Total players: ${rooms[code].players}`
         );
 
-        res.writeHead(200, { "Content-Type": "application/json" });
+        res.writeHead(200, {
+            "Content-Type": "application/json"
+        });
+
         res.end(JSON.stringify({
             success: true,
             playerId: playerId,
             players: rooms[code].players
         }));
+
         return;
     }
 
-    // --- PLAYER STATE ---
+
+    // ========================================================
+    // PLAYER STATE
+    // ========================================================
+
     if (path === "/state") {
 
-        // ----- SEND PLAYER STATE -----
+
+        // ----------------------------------------------------
+        // SEND PLAYER STATE
+        // ----------------------------------------------------
+
         if (req.method === "POST") {
+
             let body = "";
 
             req.on("data", chunk => {
@@ -122,13 +242,16 @@ const server = http.createServer((req, res) => {
             });
 
             req.on("end", () => {
+
                 try {
+
                     const data = JSON.parse(body);
 
                     const code = data.code;
                     const playerId = data.playerId;
 
                     if (!code || !playerId || !rooms[code]) {
+
                         res.writeHead(404, {
                             "Content-Type": "application/json"
                         });
@@ -141,7 +264,9 @@ const server = http.createServer((req, res) => {
                         return;
                     }
 
+
                     if (!rooms[code].playerIds.includes(playerId)) {
+
                         res.writeHead(403, {
                             "Content-Type": "application/json"
                         });
@@ -154,18 +279,26 @@ const server = http.createServer((req, res) => {
                         return;
                     }
 
+
                     if (!rooms[code].playerStates) {
                         rooms[code].playerStates = {};
                     }
 
+
                     rooms[code].playerStates[playerId] = {
+
                         head: data.head || null,
+
                         left_hand: data.left_hand || null,
+
                         right_hand: data.right_hand || null,
+
                         lastUpdate: Date.now()
                     };
 
+
                     rooms[code].lastHeartbeat = Date.now();
+
 
                     res.writeHead(200, {
                         "Content-Type": "application/json"
@@ -175,8 +308,13 @@ const server = http.createServer((req, res) => {
                         success: true
                     }));
 
+
                 } catch (error) {
-                    console.log("STATE JSON ERROR:", error);
+
+                    console.log(
+                        "STATE JSON ERROR:",
+                        error
+                    );
 
                     res.writeHead(400, {
                         "Content-Type": "application/json"
@@ -192,12 +330,21 @@ const server = http.createServer((req, res) => {
             return;
         }
 
-        // ----- GET ALL PLAYER STATES -----
+
+        // ----------------------------------------------------
+        // GET ALL PLAYER STATES
+        // ----------------------------------------------------
+
         if (req.method === "GET") {
+
             const code = url.searchParams.get("code");
-            const playerId = url.searchParams.get("playerId");
+
+            const playerId =
+                url.searchParams.get("playerId");
+
 
             if (!code || !rooms[code]) {
+
                 res.writeHead(404, {
                     "Content-Type": "application/json"
                 });
@@ -210,16 +357,23 @@ const server = http.createServer((req, res) => {
                 return;
             }
 
-            const allStates = rooms[code].playerStates || {};
 
-            // Don't send the requesting player's own state back.
+            const allStates =
+                rooms[code].playerStates || {};
+
+
             const otherPlayers = {};
 
+
             for (const id in allStates) {
+
                 if (id !== playerId) {
-                    otherPlayers[id] = allStates[id];
+
+                    otherPlayers[id] =
+                        allStates[id];
                 }
             }
+
 
             res.writeHead(200, {
                 "Content-Type": "application/json"
@@ -234,134 +388,259 @@ const server = http.createServer((req, res) => {
         }
     }
 
-    // --- HEARTBEAT ---
-    if (path === "/heartbeat") {
-        const code = url.searchParams.get("code");
 
-        console.log("HEARTBEAT RECEIVED:", code);
+    // ========================================================
+    // HEARTBEAT
+    // ========================================================
+
+    if (path === "/heartbeat") {
+
+        const code =
+            url.searchParams.get("code");
+
+
+        console.log(
+            "HEARTBEAT RECEIVED:",
+            code
+        );
+
 
         if (!code || !rooms[code]) {
-            res.writeHead(404, { "Content-Type": "application/json" });
+
+            res.writeHead(404, {
+                "Content-Type": "application/json"
+            });
+
             res.end(JSON.stringify({
                 success: false,
                 error: "Room not found"
             }));
+
             return;
         }
 
-        rooms[code].lastHeartbeat = Date.now();
 
-        res.writeHead(200, { "Content-Type": "application/json" });
+        rooms[code].lastHeartbeat =
+            Date.now();
+
+
+        res.writeHead(200, {
+            "Content-Type": "application/json"
+        });
+
         res.end(JSON.stringify({
             success: true
         }));
+
         return;
     }
 
-    // --- LEAVE ROOM ---
+
+    // ========================================================
+    // LEAVE ROOM
+    // ========================================================
+
     if (path === "/leave") {
-        const code = url.searchParams.get("code");
-        const playerId = url.searchParams.get("playerId");
+
+        const code =
+            url.searchParams.get("code");
+
+        const playerId =
+            url.searchParams.get("playerId");
+
 
         if (!code || !rooms[code]) {
-            res.writeHead(404, { "Content-Type": "application/json" });
+
+            res.writeHead(404, {
+                "Content-Type": "application/json"
+            });
+
             res.end(JSON.stringify({
                 success: false,
                 error: "Room not found"
             }));
+
             return;
         }
 
-        if (playerId && rooms[code].playerIds) {
-            rooms[code].playerIds = rooms[code].playerIds.filter(
-                id => id !== playerId
-            );
+
+        if (
+            playerId &&
+            rooms[code].playerIds
+        ) {
+
+            rooms[code].playerIds =
+                rooms[code].playerIds.filter(
+                    id => id !== playerId
+                );
         }
 
-        if (playerId && rooms[code].playerStates) {
-            delete rooms[code].playerStates[playerId];
+
+        if (
+            playerId &&
+            rooms[code].playerStates
+        ) {
+
+            delete rooms[code]
+                .playerStates[playerId];
         }
+
 
         rooms[code].players -= 1;
 
+
         if (rooms[code].players <= 0) {
+
             delete rooms[code];
 
-            console.log("Room deleted:", code);
 
-            res.writeHead(200, { "Content-Type": "application/json" });
+            console.log(
+                "Room deleted:",
+                code
+            );
+
+
+            res.writeHead(200, {
+                "Content-Type": "application/json"
+            });
+
             res.end(JSON.stringify({
                 success: true,
                 deleted: true
             }));
+
             return;
         }
+
 
         console.log(
             `Player left room ${code}. Remaining players: ${rooms[code].players}`
         );
 
-        res.writeHead(200, { "Content-Type": "application/json" });
+
+        res.writeHead(200, {
+            "Content-Type": "application/json"
+        });
+
         res.end(JSON.stringify({
             success: true,
             deleted: false,
             players: rooms[code].players
         }));
+
         return;
     }
 
-    // --- LIST ROOMS ---
+
+    // ========================================================
+    // LIST ROOMS
+    // ========================================================
+
     if (path === "/rooms") {
-        res.writeHead(200, { "Content-Type": "application/json" });
+
+        res.writeHead(200, {
+            "Content-Type": "application/json"
+        });
+
         res.end(JSON.stringify({
             rooms: rooms
         }));
+
         return;
     }
 
-    // --- UNKNOWN REQUEST ---
-    res.writeHead(404, { "Content-Type": "application/json" });
+
+    // ========================================================
+    // UNKNOWN REQUEST
+    // ========================================================
+
+    res.writeHead(404, {
+        "Content-Type": "application/json"
+    });
+
     res.end(JSON.stringify({
         success: false,
         error: "Unknown request"
     }));
 });
 
+
+// ============================================================
 // CHECK FOR DEAD ROOMS EVERY 5 SECONDS
+// ============================================================
+
 setInterval(() => {
+
     const now = Date.now();
 
+
     for (const code in rooms) {
+
         const room = rooms[code];
+
 
         const timeSinceHeartbeat =
             now - room.lastHeartbeat;
 
-        // 30 seconds without heartbeat = room timeout
+
+        // 30 seconds without heartbeat
+        // = room timeout
+
         if (timeSinceHeartbeat > 30000) {
-            console.log("Room timed out:", code);
+
+            console.log(
+                "Room timed out:",
+                code
+            );
+
             delete rooms[code];
+
             continue;
         }
 
-        // Remove player tracking data that stopped updating
-        if (room.playerStates) {
-            for (const playerId in room.playerStates) {
-                const state = room.playerStates[playerId];
 
-                if (now - state.lastUpdate > 10000) {
+        // ----------------------------------------------------
+        // REMOVE OLD PLAYER TRACKING DATA
+        // ----------------------------------------------------
+
+        if (room.playerStates) {
+
+            for (
+                const playerId in room.playerStates
+            ) {
+
+                const state =
+                    room.playerStates[playerId];
+
+
+                if (
+                    now - state.lastUpdate >
+                    10000
+                ) {
+
                     console.log(
                         `Tracking timeout for player ${playerId} in room ${code}`
                     );
 
-                    delete room.playerStates[playerId];
+
+                    delete room
+                        .playerStates[playerId];
                 }
             }
         }
     }
+
 }, 5000);
 
+
+// ============================================================
 // START SERVER
+// ============================================================
+
 server.listen(PORT, HOST, () => {
-    console.log(`Server running on ${HOST}:${PORT}`);
+
+    console.log(
+        `Server running on ${HOST}:${PORT}`
+    );
+
 });
